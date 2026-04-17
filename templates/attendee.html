@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Attendee Guide — VenueIQ{% endblock %}
+
+{% block head %}
+<script>
+  window.MAPS_API_KEY = "{{ maps_key }}";
+  window.EVENT_LAT    = {{ event.lat }};
+  window.EVENT_LNG    = {{ event.lng }};
+  window.ZONES_DATA   = {{ zones | tojson }};
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <!-- Navbar -->
+  <nav class="navbar" role="navigation" aria-label="Attendee navigation">
+    <a class="nav-brand" href="/" aria-label="VenueIQ home">
+      <span class="material-symbols-rounded" aria-hidden="true">sensors</span>
+      VenueIQ
+    </a>
+    <div class="nav-links">
+      <span class="badge badge-quiet" aria-label="Attendee view">
+        <span class="material-symbols-rounded" aria-hidden="true" style="font-size:.9rem;">person</span>
+        Attendee
+      </span>
+      <span class="live-dot" aria-hidden="true" style="margin-left:.75rem;"></span>
+      <span style="font-size:.82rem;color:var(--muted);margin-left:.3rem;">LIVE</span>
+      <a href="/organizer" class="btn btn-outline" style="margin-left:.5rem;padding:.4rem .9rem;font-size:.82rem;">
+        Organizer View
+      </a>
+    </div>
+  </nav>
+
+  <main id="main-content" class="dash-main">
+
+    <div style="margin-bottom:1.5rem;">
+      <h1 style="font-size:1.6rem;">
+        <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;color:var(--success);">support_agent</span>
+        Your Smart Event Guide
+      </h1>
+      <p style="margin-top:.25rem;">{{ event.name }} · Powered by Gemini AI</p>
+    </div>
+
+    <!-- Announcements ticker -->
+    <div style="margin-bottom:1.25rem;" aria-live="polite" aria-label="Event announcements">
+      <div class="ticker-wrap">
+        <span class="material-symbols-rounded" aria-hidden="true"
+              style="vertical-align:middle;font-size:1rem;margin-right:.5rem;">campaign</span>
+        <span id="ticker-text">Loading announcements…</span>
+      </div>
+    </div>
+
+    <!-- Row 1: Chat + Zone Status -->
+    <div class="dash-grid dash-grid-3" style="margin-bottom:1.25rem;">
+
+      <!-- AI Chat -->
+      <div class="card" aria-label="AI assistant chat">
+        <div class="card-header">
+          <span class="card-title">
+            <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;color:var(--primary);">psychology</span>
+            Ask VenueIQ
+          </span>
+          <button class="btn btn-outline" style="padding:.3rem .7rem;font-size:.78rem;"
+                  onclick="clearChat()" aria-label="Clear chat history">
+            <span class="material-symbols-rounded" aria-hidden="true" style="font-size:.9rem;">restart_alt</span>
+          </button>
+        </div>
+
+        <div class="chat-container">
+          <div class="chat-messages" id="chat-messages" role="log"
+               aria-label="Chat conversation" aria-live="polite">
+            <!-- Welcome message -->
+            <div class="msg msg-ai" role="article" aria-label="VenueIQ greeting">
+              👋 Hi! I'm VenueIQ, your AI guide for <strong>{{ event.name }}</strong>.
+              I know the live crowd status of every zone. Ask me anything!
+              <br/><br/>
+              <em style="font-size:.82rem;color:var(--muted);">
+                Try: "Where should I eat right now?" or "Which workshops are less crowded?"
+              </em>
+            </div>
+          </div>
+
+          <div class="chat-input-row">
+            <input type="text" id="chat-input"
+                   placeholder="Ask about any zone, session, or logistics…"
+                   aria-label="Type your question for VenueIQ"
+                   maxlength="500"
+                   onkeydown="if(event.key==='Enter')sendChat()" />
+            <button class="btn btn-primary" onclick="sendChat()"
+                    id="btn-send" aria-label="Send message">
+              <span class="material-symbols-rounded" aria-hidden="true">send</span>
+            </button>
+          </div>
+
+          <!-- Quick prompts -->
+          <div style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.6rem;" aria-label="Quick question suggestions">
+            <button class="btn btn-outline" style="font-size:.75rem;padding:.3rem .7rem;"
+                    onclick="quickAsk('Where is the least crowded zone right now?')"
+                    aria-label="Ask about least crowded zone">
+              🏃 Least crowded?
+            </button>
+            <button class="btn btn-outline" style="font-size:.75rem;padding:.3rem .7rem;"
+                    onclick="quickAsk('Where should I eat lunch?')"
+                    aria-label="Ask food recommendation">
+              🍕 Best food spot?
+            </button>
+            <button class="btn btn-outline" style="font-size:.75rem;padding:.3rem .7rem;"
+                    onclick="quickAsk('What is the current status of the Main Hall?')"
+                    aria-label="Ask about Main Hall status">
+              🎤 Main Hall?
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Zone Status -->
+      <div class="card" aria-label="Live zone status">
+        <div class="card-header">
+          <span class="card-title">
+            <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;">groups</span>
+            Zone Status
+          </span>
+          <span style="font-size:.78rem;color:var(--muted);" aria-live="polite">Auto-refreshing</span>
+        </div>
+
+        <div id="attendee-zones" role="list" aria-label="Current crowd status per zone">
+          {% for zone in zones %}
+          <div class="zone-card" id="att-zone-{{ zone.id }}" role="listitem" style="margin-bottom:.5rem;"
+               aria-label="{{ zone.name }}: {{ zone.status }}">
+            <div class="zone-card-header">
+              <span class="zone-name" style="font-size:.88rem;">{{ zone.name }}</span>
+              <span class="badge badge-{{ zone.status }}" id="att-badge-{{ zone.id }}">
+                {{ zone.status | capitalize }}
+              </span>
+            </div>
+            <div class="capacity-bar-track" role="progressbar"
+                 aria-valuenow="{{ zone.percentage }}" aria-valuemin="0" aria-valuemax="100"
+                 aria-label="{{ zone.name }} occupancy: {{ zone.percentage }}%">
+              <div class="capacity-bar-fill fill-{{ zone.status }}"
+                   id="att-bar-{{ zone.id }}" style="width:{{ zone.percentage }}%"></div>
+            </div>
+            <div style="font-size:.75rem;color:var(--muted);margin-top:.3rem;">
+              {{ zone.description }}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Venue Map -->
+    <section class="card" aria-label="Venue navigation map">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;">location_on</span>
+          Venue Map — {{ event.venue }}
+        </span>
+        <span class="badge badge-quiet">Google Maps</span>
+      </div>
+      <div class="map-container" role="application" aria-label="Interactive map of {{ event.venue }}">
+        {% if maps_key %}
+        <iframe
+          title="Venue map — {{ event.venue }}"
+          loading="lazy"
+          allowfullscreen
+          referrerpolicy="no-referrer-when-downgrade"
+          src="https://www.google.com/maps/embed/v1/place?key={{ maps_key }}&q={{ event.venue | urlencode }}&zoom=17">
+        </iframe>
+        {% else %}
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);flex-direction:column;gap:.5rem;">
+          <span class="material-symbols-rounded" style="font-size:2.5rem;" aria-hidden="true">location_off</span>
+          <p style="font-size:.85rem;">Set GOOGLE_MAPS_API_KEY to enable the map</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chat.js" defer></script>
+<script src="/static/js/attendee.js" defer></script>
+{% endblock %}

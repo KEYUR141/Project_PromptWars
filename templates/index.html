@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}VenueIQ — Smart Event Intelligence{% endblock %}
+
+{% block content %}
+<main id="main-content">
+  <nav class="navbar" role="navigation" aria-label="Main navigation">
+    <a class="nav-brand" href="/" aria-label="VenueIQ home">
+      <span class="material-symbols-rounded" aria-hidden="true">sensors</span>
+      VenueIQ
+    </a>
+    <div class="nav-links">
+      <span class="live-dot" aria-hidden="true"></span>
+      <span style="font-size:.85rem;color:var(--muted);margin-left:.4rem;">LIVE</span>
+    </div>
+  </nav>
+
+  <section class="hero" aria-labelledby="hero-heading">
+    <div class="hero-inner">
+      <!-- Event badge -->
+      <div style="margin-bottom:1.5rem;">
+        <span class="badge badge-moderate" aria-label="Ongoing event">
+          <span class="live-dot" aria-hidden="true"></span>
+          &nbsp;{{ event.date }}
+        </span>
+      </div>
+
+      <h1 id="hero-heading">
+        Welcome to<br/>
+        <span class="text-gradient">{{ event.name }}</span>
+      </h1>
+
+      <p>Your AI-powered crowd intelligence companion.<br/>
+         Real-time venue insights, smarter decisions.</p>
+
+      <div style="display:flex;justify-content:center;gap:1rem;flex-wrap:wrap;margin-bottom:2rem;">
+        <span class="badge badge-quiet">
+          <span class="material-symbols-rounded" aria-hidden="true" style="font-size:1rem;">location_on</span>
+          {{ event.venue }}
+        </span>
+      </div>
+
+      <!-- Role selector cards -->
+      <div class="role-cards" role="list">
+
+        <a class="role-card" href="/organizer" role="listitem"
+           aria-label="Enter as Organizer — access the real-time crowd management dashboard">
+          <span class="material-symbols-rounded icon" aria-hidden="true"
+                style="color:var(--primary);">dashboard</span>
+          <h3>Organizer</h3>
+          <p>Real-time heatmap, AI crowd alerts, and broadcast announcements</p>
+          <span class="btn btn-primary" style="margin-top:.5rem;width:100%;justify-content:center;">
+            <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span>
+            Open Dashboard
+          </span>
+        </a>
+
+        <a class="role-card" href="/attendee" role="listitem"
+           aria-label="Enter as Attendee — get AI-powered venue guidance">
+          <span class="material-symbols-rounded icon" aria-hidden="true"
+                style="color:var(--success);">support_agent</span>
+          <h3>Attendee</h3>
+          <p>Ask VenueIQ anything — get live crowd-aware guidance and navigation</p>
+          <span class="btn btn-outline" style="margin-top:.5rem;width:100%;justify-content:center;">
+            <span class="material-symbols-rounded" aria-hidden="true">arrow_forward</span>
+            Get My Guide
+          </span>
+        </a>
+
+      </div>
+
+      <!-- Feature highlights -->
+      <div style="margin-top:3rem;display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;">
+        <div style="text-align:center;">
+          <span class="material-symbols-rounded" style="font-size:1.8rem;color:var(--primary);" aria-hidden="true">psychology</span>
+          <p style="font-size:.8rem;margin-top:.3rem;">Gemini AI</p>
+        </div>
+        <div style="text-align:center;">
+          <span class="material-symbols-rounded" style="font-size:1.8rem;color:var(--success);" aria-hidden="true">location_on</span>
+          <p style="font-size:.8rem;margin-top:.3rem;">Google Maps</p>
+        </div>
+        <div style="text-align:center;">
+          <span class="material-symbols-rounded" style="font-size:1.8rem;color:var(--warning);" aria-hidden="true">bolt</span>
+          <p style="font-size:.8rem;margin-top:.3rem;">Real-Time</p>
+        </div>
+        <div style="text-align:center;">
+          <span class="material-symbols-rounded" style="font-size:1.8rem;color:var(--info);" aria-hidden="true">cloud</span>
+          <p style="font-size:.8rem;margin-top:.3rem;">Cloud Run</p>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+{% block title %}Organizer Dashboard — VenueIQ{% endblock %}
+
+{% block head %}
+<script>
+  window.MAPS_API_KEY = "{{ maps_key }}";
+  window.EVENT_LAT    = {{ event.lat }};
+  window.EVENT_LNG    = {{ event.lng }};
+  window.ZONES_DATA   = {{ zones | tojson }};
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+
+  <!-- Navbar -->
+  <nav class="navbar" role="navigation" aria-label="Organizer navigation">
+    <a class="nav-brand" href="/" aria-label="VenueIQ home">
+      <span class="material-symbols-rounded" aria-hidden="true">sensors</span>
+      VenueIQ
+    </a>
+    <div class="nav-links">
+      <span class="badge badge-critical" aria-label="Organizer view">
+        <span class="material-symbols-rounded" aria-hidden="true" style="font-size:.9rem;">admin_panel_settings</span>
+        Organizer
+      </span>
+      <span class="live-dot" aria-hidden="true" style="margin-left:.75rem;"></span>
+      <span style="font-size:.82rem;color:var(--muted);margin-left:.3rem;" aria-live="polite" id="last-updated">LIVE</span>
+      <a href="/attendee" class="btn btn-outline" style="margin-left:.5rem;padding:.4rem .9rem;font-size:.82rem;">
+        Switch to Attendee
+      </a>
+    </div>
+  </nav>
+
+  <!-- Main content -->
+  <main id="main-content" class="dash-main">
+
+    <!-- Page header -->
+    <div style="margin-bottom:1.5rem;">
+      <h1 style="font-size:1.6rem;">
+        <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;color:var(--primary);">bar_chart_4_bars</span>
+        Crowd Intelligence Dashboard
+      </h1>
+      <p style="margin-top:.25rem;">{{ event.name }} · {{ event.venue }}</p>
+    </div>
+
+    <!-- Stats row -->
+    <section aria-label="Event statistics" style="margin-bottom:1.5rem;">
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-value text-gradient" id="stat-total">—</div>
+          <div class="stat-label">Total Attendees</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--danger);" id="stat-critical">—</div>
+          <div class="stat-label">Critical Zones</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--warning);" id="stat-busy">—</div>
+          <div class="stat-label">Busy Zones</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value" style="color:var(--success);" id="stat-quiet">—</div>
+          <div class="stat-label">Quiet Zones</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Row 1: Map + AI Alerts -->
+    <section class="dash-grid dash-grid-3" style="margin-bottom:1.25rem;" aria-label="Map and AI alerts">
+
+      <!-- Google Maps Heatmap -->
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">
+            <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;">location_on</span>
+            Venue Map
+          </span>
+          <span class="badge badge-quiet">Google Maps</span>
+        </div>
+        <div class="map-container" role="application" aria-label="Interactive venue map showing event location">
+          {% if maps_key %}
+          <iframe
+            title="VenueIQ venue map — {{ event.venue }}"
+            loading="lazy"
+            allowfullscreen
+            referrerpolicy="no-referrer-when-downgrade"
+            src="https://www.google.com/maps/embed/v1/place?key={{ maps_key }}&q={{ event.venue | urlencode }}&zoom=17">
+          </iframe>
+          {% else %}
+          <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);flex-direction:column;gap:.5rem;">
+            <span class="material-symbols-rounded" style="font-size:2.5rem;">location_off</span>
+            <p style="font-size:.85rem;">Set GOOGLE_MAPS_API_KEY to enable map</p>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- AI Alerts Panel -->
+      <div class="card" aria-live="polite" aria-label="AI-generated crowd alerts">
+        <div class="card-header">
+          <span class="card-title">
+            <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;color:var(--primary);">psychology</span>
+            AI Alerts
+          </span>
+          <button id="btn-analyze" class="btn btn-primary" aria-label="Run AI crowd analysis"
+                  style="padding:.4rem .9rem;font-size:.82rem;">
+            <span class="material-symbols-rounded" aria-hidden="true" style="font-size:1rem;">refresh</span>
+            Analyze
+          </button>
+        </div>
+        <div id="alerts-feed" aria-label="AI alert feed">
+          <div style="text-align:center;color:var(--muted);padding:2rem 0;">
+            <span class="material-symbols-rounded" style="font-size:2rem;display:block;margin-bottom:.5rem;" aria-hidden="true">psychology</span>
+            Click <strong>Analyze</strong> to generate AI crowd insights
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Row 2: Zone Capacities -->
+    <section class="card" style="margin-bottom:1.25rem;" aria-label="Zone capacity overview">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;">groups</span>
+          Zone Capacity — Live
+        </span>
+        <span style="font-size:.8rem;color:var(--muted);" aria-live="polite" id="capacity-updated">Refreshing every 30s</span>
+      </div>
+      <div class="zones-grid" id="zones-grid" role="list" aria-label="Venue zones with current capacity">
+        {% for zone in zones %}
+        <div class="zone-card" role="listitem" id="zone-{{ zone.id }}"
+             aria-label="{{ zone.name }}: {{ zone.current }} of {{ zone.capacity }} ({{ zone.percentage }}%)">
+          <div class="zone-card-header">
+            <span class="zone-name">{{ zone.name }}</span>
+            <span class="badge badge-{{ zone.status }}" aria-label="Status: {{ zone.status }}">
+              {{ zone.status | capitalize }}
+            </span>
+          </div>
+          <div class="capacity-bar-wrap">
+            <div class="capacity-bar-label">
+              <span style="color:var(--muted);font-size:.8rem;">{{ zone.description }}</span>
+              <span style="font-weight:600;font-size:.88rem;" id="pct-{{ zone.id }}">
+                {{ zone.current }}/{{ zone.capacity }}
+              </span>
+            </div>
+            <div class="capacity-bar-track" role="progressbar"
+                 aria-valuenow="{{ zone.percentage }}" aria-valuemin="0" aria-valuemax="100"
+                 aria-label="{{ zone.name }} occupancy">
+              <div class="capacity-bar-fill fill-{{ zone.status }}"
+                   id="bar-{{ zone.id }}"
+                   style="width:{{ zone.percentage }}%"></div>
+            </div>
+          </div>
+          <!-- Inline update control (organizer only) -->
+          <div style="display:flex;gap:.4rem;margin-top:.6rem;">
+            <input type="number" id="input-{{ zone.id }}" aria-label="Set crowd count for {{ zone.name }}"
+                   value="{{ zone.current }}" min="0" max="{{ zone.capacity }}"
+                   style="font-size:.8rem;padding:.3rem .6rem;width:80px;" />
+            <button class="btn btn-outline" style="font-size:.78rem;padding:.3rem .7rem;"
+                    onclick="updateCrowd('{{ zone.id }}')"
+                    aria-label="Update crowd count for {{ zone.name }}">
+              Set
+            </button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </section>
+
+    <!-- Row 3: Announce -->
+    <section class="card" aria-label="Broadcast announcements to attendees">
+      <div class="card-header">
+        <span class="card-title">
+          <span class="material-symbols-rounded" aria-hidden="true" style="vertical-align:middle;">campaign</span>
+          Broadcast Announcement
+        </span>
+      </div>
+      <div class="announce-row">
+        <input type="text" id="announce-text" maxlength="300"
+               placeholder="Type an announcement for attendees…"
+               aria-label="Announcement text" />
+        <select id="announce-type" aria-label="Announcement priority level" style="width:130px;">
+          <option value="info">ℹ️ Info</option>
+          <option value="warning">⚠️ Warning</option>
+          <option value="critical">🚨 Critical</option>
+        </select>
+        <button class="btn btn-primary" id="btn-announce" onclick="sendAnnouncement()"
+                aria-label="Send announcement to all attendees">
+          <span class="material-symbols-rounded" aria-hidden="true">send</span>
+          Send
+        </button>
+      </div>
+      <div id="announce-status" aria-live="polite" style="margin-top:.75rem;font-size:.85rem;"></div>
+    </section>
+
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/charts.js" defer></script>
+<script src="/static/js/organizer.js" defer></script>
+{% endblock %}

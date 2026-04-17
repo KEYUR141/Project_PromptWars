@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="VenueIQ — AI-powered real-time crowd intelligence for physical events. Built for Hack2Skill PromptWars 2026." />
+  <meta name="theme-color" content="#080d1a" />
+  <title>{% block title %}VenueIQ{% endblock %} | AI Crowd Intelligence</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,500,1,0" />
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <!-- Skip navigation for screen readers -->
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  {% block content %}{% endblock %}
+
+  <script src="/static/js/app.js" defer></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

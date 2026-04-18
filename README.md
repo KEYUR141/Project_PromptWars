@@ -93,7 +93,7 @@ This ensures responses are always grounded in current venue reality.
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/YOUR_USERNAME/Project_PromptWars.git
+git clone https://github.com/Keyur141/Project_PromptWars.git
 cd Project_PromptWars
 
 # 2. Create virtual environment
@@ -182,9 +182,11 @@ gcloud run deploy venueiq \
 | Service | Role |
 |---|---|
 | **Gemini 2.0 Flash** | Core AI: crowd-aware attendee chat + organizer decision alerts |
-| **Google Maps Embed** | Interactive venue map on both organizer and attendee views |
+| **Google Cloud Logging** | Structured production logs — auto-shipped to Cloud Logging on GCP |
+| **Google Cloud Firestore** | Persistent storage: announcements + AI alerts survive restarts |
+| **Google Maps Embed** | Interactive venue map on organizer and attendee views |
 | **Google Fonts** | Outfit (headings) + Inter (body) — loaded from fonts.googleapis.com |
-| **Google Material Symbols** | All UI icons via fonts.googleapis.com/css2?family=Material+Symbols+Rounded |
+| **Google Material Symbols** | All UI icons via fonts.googleapis.com |
 | **Google Cloud Run** | Production deployment (containerised, serverless, auto-scaling) |
 
 ---

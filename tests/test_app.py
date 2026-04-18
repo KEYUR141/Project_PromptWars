@@ -237,3 +237,53 @@ async def test_chat_empty_message_rejected(transport):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.post("/api/chat", json={"message": ""})
     assert resp.status_code == 422
+
+
+# ─────────────────────────────────────────────────────────
+# Helper Functions Tests
+# ─────────────────────────────────────────────────────────
+
+def test_status_label_boundaries():
+    """Verify status_label function at exact boundary conditions."""
+    from app import status_label
+    assert status_label(39) == "quiet"
+    assert status_label(40) == "moderate"
+    assert status_label(69) == "moderate"
+    assert status_label(70) == "busy"
+    assert status_label(89) == "busy"
+    assert status_label(90) == "critical"
+    assert status_label(100) == "critical"
+
+def test_build_crowd_context():
+    """Verify build_crowd_context generates expected string structure."""
+    from app import build_crowd_context, EVENT_CONFIG
+    context = build_crowd_context()
+    assert isinstance(context, str)
+    assert "LIVE CROWD STATUS" in context
+    assert EVENT_CONFIG['name'] in context
+    assert "Main Hall:" in context
+    assert "%" in context
+
+
+# ─────────────────────────────────────────────────────────
+# Integration Chains
+# ─────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_announce_chain(transport):
+    """Verify posting an announcement makes it available in the get list."""
+    payload = {"text": "Chain test announcement!", "type": "warning"}
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Post it
+        post_resp = await client.post("/api/announce", json=payload)
+        assert post_resp.status_code == 201
+        
+        # Get it
+        get_resp = await client.get("/api/announcements")
+        assert get_resp.status_code == 200
+        get_body = get_resp.json()
+        
+        # Verify it's in the list
+        found = any(a["text"] == payload["text"] and a["type"] == payload["type"] 
+                    for a in get_body["announcements"])
+        assert found is True

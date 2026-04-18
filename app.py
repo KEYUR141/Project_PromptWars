@@ -3,12 +3,14 @@ VenueIQ — AI-Powered Real-Time Crowd Intelligence Platform
 ===========================================================
 Hack2Skill PromptWars 2026 | Physical Event Experience Vertical
 
-Author: VenueIQ Team
-Version: 1.0.0
+Author:  VenueIQ Team
+Version: 2.0.0
 
 Architecture:
   - FastAPI backend with async endpoints
   - Gemini 2.0 Flash for context-aware AI decisions
+  - Google Cloud Logging for structured production logs
+  - Google Cloud Firestore for persistent announcements & AI alerts
   - In-memory crowd simulation with background updates
   - Jinja2 templates for server-side rendering
   - Deployed on Google Cloud Run via Docker
@@ -25,8 +27,10 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 import google.generativeai as genai
-from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import HTMLResponse, JSONResponse
+import google.cloud.logging as cloud_logging
+from google.cloud import firestore
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field, field_validator
@@ -41,21 +45,56 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ── Google Cloud Logging (falls back to stdlib when not on GCP) ──
+try:
+    _cloud_log_client = cloud_logging.Client()
+    _cloud_log_client.setup_logging(log_level=logging.INFO)
+    logger = logging.getLogger(__name__)
+    logger.info("Google Cloud Logging initialised")
+except Exception:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Falling back to stdlib logging (not running on GCP)")
 
+# ── Environment ──
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY", "")
-SECRET_KEY = os.getenv("SECRET_KEY", os.urandom(24).hex())
+MAPS_API_KEY   = os.getenv("GOOGLE_MAPS_API_KEY", "")
+SECRET_KEY     = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY:
+    SECRET_KEY = os.urandom(24).hex()
+    logger.warning("SECRET_KEY not set — generated an ephemeral key. Set SECRET_KEY in production.")
 
-# Configure Gemini
+# ── Named constants (no more magic numbers) ──
+SIMULATION_INTERVAL_SECS: int   = 30
+CROWD_DRIFT_FACTOR:       float = 0.15
+CROWD_DELTA_RANGE:        int   = 20
+INITIAL_FILL_FRACTION:   float = 0.50
+MAX_ANNOUNCEMENTS:        int   = 10
+MAX_AI_ALERTS:            int   = 3
+MAX_HISTORY_ITEMS:        int   = 6
+
+# ── Gemini ──
 gemini_model = None
 if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-    logger.info("Gemini AI configured successfully")
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel("gemini-2.0-flash")
+        logger.info("Gemini AI configured successfully")
+    except Exception as exc:
+        logger.error("Failed to configure Gemini: %s", exc)
 else:
     logger.warning("GEMINI_API_KEY not set — AI features will be disabled")
+
+# ── Firestore (falls back to in-memory when credentials unavailable) ──
+db: Optional[firestore.Client] = None
+try:
+    db = firestore.Client()
+    logger.info("Firestore client initialised")
+except Exception as exc:
+    logger.warning("Firestore unavailable (%s) — using in-memory store", exc)
 
 # ─────────────────────────────────────────────────────────
 # VENUE & EVENT DATA
@@ -124,7 +163,10 @@ ZONE_DEFINITIONS: dict[str, dict] = {
 
 # Mutable crowd state (shallow copy so we can update "current" independently)
 crowd_state: dict[str, dict] = {
-    zone_id: {**zone, "current": random.randint(20, int(zone["capacity"] * 0.5))}
+    zone_id: {
+        **zone,
+        "current": random.randint(20, int(zone["capacity"] * INITIAL_FILL_FRACTION)),
+    }
     for zone_id, zone in ZONE_DEFINITIONS.items()
 }
 
@@ -146,40 +188,59 @@ ai_alerts_cache: list[dict] = []
 
 async def run_crowd_simulation() -> None:
     """
-    Simulate realistic crowd fluctuations every 30 seconds.
+    Simulate realistic crowd fluctuations every SIMULATION_INTERVAL_SECS seconds.
     Models natural event patterns: busy entry at open, lunch peak at food court, etc.
+    A try/except wraps the body so one transient error never kills the background task;
+    asyncio.CancelledError is always re-raised so graceful shutdown works correctly.
     """
     while True:
-        await asyncio.sleep(30)
-        hour = datetime.now().hour
+        try:
+            await asyncio.sleep(SIMULATION_INTERVAL_SECS)
+            hour = datetime.now().hour
 
-        targets = {
-            "entry_gate":        0.8 if 9 <= hour <= 10 else 0.15,
-            "main_hall":         0.85 if 10 <= hour <= 12 or 14 <= hour <= 16 else 0.4,
-            "food_court":        0.9 if 13 <= hour <= 14 else 0.3,
-            "workshop_a":        0.75 if 11 <= hour <= 13 else 0.45,
-            "workshop_b":        0.7 if 14 <= hour <= 16 else 0.35,
-            "networking_lounge": 0.6 if 16 <= hour <= 18 else 0.4,
-        }
+            targets = {
+                "entry_gate":        0.8 if 9 <= hour <= 10 else 0.15,
+                "main_hall":         0.85 if 10 <= hour <= 12 or 14 <= hour <= 16 else 0.4,
+                "food_court":        0.9 if 13 <= hour <= 14 else 0.3,
+                "workshop_a":        0.75 if 11 <= hour <= 13 else 0.45,
+                "workshop_b":        0.7 if 14 <= hour <= 16 else 0.35,
+                "networking_lounge": 0.6 if 16 <= hour <= 18 else 0.4,
+            }
 
-        for zone_id, zone in crowd_state.items():
-            target = int(zone["capacity"] * targets.get(zone_id, 0.5))
-            delta = random.randint(-20, 20)
-            drift = int((target - zone["current"]) * 0.15)
-            new_val = zone["current"] + delta + drift
-            crowd_state[zone_id]["current"] = max(0, min(zone["capacity"], new_val))
+            for zone_id, zone in crowd_state.items():
+                target  = int(zone["capacity"] * targets.get(zone_id, 0.5))
+                delta   = random.randint(-CROWD_DELTA_RANGE, CROWD_DELTA_RANGE)
+                drift   = int((target - zone["current"]) * CROWD_DRIFT_FACTOR)
+                new_val = zone["current"] + delta + drift
+                crowd_state[zone_id]["current"] = max(0, min(zone["capacity"], new_val))
 
-        logger.info("Crowd simulation updated")
+            snapshot = {zid: z["current"] for zid, z in crowd_state.items()}
+            logger.info("Crowd simulation updated | totals=%s", snapshot)
+
+        except asyncio.CancelledError:
+            logger.info("Crowd simulation task cancelled — shutting down gracefully")
+            raise  # must re-raise so the task actually stops
+        except Exception as exc:
+            logger.error("Crowd simulation error (task will continue): %s", exc, exc_info=True)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> None:
     """Manage application lifespan: start background tasks on startup."""
     task = asyncio.create_task(run_crowd_simulation())
-    logger.info("VenueIQ started — crowd simulation running")
-    yield
-    task.cancel()
-    logger.info("VenueIQ shutting down")
+    logger.info(
+        "VenueIQ started | gemini=%s | firestore=%s | maps=%s",
+        bool(GEMINI_API_KEY), db is not None, bool(MAPS_API_KEY),
+    )
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        logger.info("VenueIQ shutdown complete")
 
 
 # ─────────────────────────────────────────────────────────
@@ -290,12 +351,26 @@ def serialize_zones() -> list[dict]:
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    """Add security headers to every response."""
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    """Add comprehensive security headers to every HTTP response."""
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        logger.error("Unhandled middleware error: %s", exc, exc_info=True)
+        raise
+    response.headers["X-Content-Type-Options"]  = "nosniff"
+    response.headers["X-Frame-Options"]         = "DENY"
+    response.headers["X-XSS-Protection"]        = "1; mode=block"
+    response.headers["Referrer-Policy"]         = "strict-origin-when-cross-origin"
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://maps.googleapis.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https://*.googleapis.com https://*.gstatic.com; "
+        "frame-src https://www.google.com; "
+        "connect-src 'self'"
+    )
     return response
 
 
@@ -306,30 +381,45 @@ async def add_security_headers(request: Request, call_next):
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def index(request: Request):
     """Landing page — choose Organizer or Attendee role."""
-    return templates.TemplateResponse(request, "index.html", {
-        "event": EVENT_CONFIG,
-        "maps_key": MAPS_API_KEY,
-    })
+    try:
+        return templates.TemplateResponse(request, "index.html", {
+            "event": EVENT_CONFIG,
+            "maps_key": MAPS_API_KEY,
+        })
+    except Exception as exc:
+        logger.error("Failed to render index page: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Page temporarily unavailable.")
 
 
 @app.get("/organizer", response_class=HTMLResponse, include_in_schema=False)
 async def organizer_view(request: Request):
     """Organizer dashboard — live crowd heatmap, capacity bars, AI alerts."""
-    return templates.TemplateResponse(request, "organizer.html", {
-        "event": EVENT_CONFIG,
-        "zones": serialize_zones(),
-        "maps_key": MAPS_API_KEY,
-    })
+    try:
+        zones = serialize_zones()
+        logger.info("Organizer dashboard served | zones=%d", len(zones))
+        return templates.TemplateResponse(request, "organizer.html", {
+            "event": EVENT_CONFIG,
+            "zones": zones,
+            "maps_key": MAPS_API_KEY,
+        })
+    except Exception as exc:
+        logger.error("Failed to render organizer dashboard: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Dashboard temporarily unavailable.")
 
 
 @app.get("/attendee", response_class=HTMLResponse, include_in_schema=False)
 async def attendee_view(request: Request):
     """Attendee smart guide — AI chat, zone status, venue map."""
-    return templates.TemplateResponse(request, "attendee.html", {
-        "event": EVENT_CONFIG,
-        "zones": serialize_zones(),
-        "maps_key": MAPS_API_KEY,
-    })
+    try:
+        zones = serialize_zones()
+        return templates.TemplateResponse(request, "attendee.html", {
+            "event": EVENT_CONFIG,
+            "zones": zones,
+            "maps_key": MAPS_API_KEY,
+        })
+    except Exception as exc:
+        logger.error("Failed to render attendee page: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Page temporarily unavailable.")
 
 
 # ─────────────────────────────────────────────────────────
@@ -343,22 +433,42 @@ async def get_crowd_status(request: Request):
     Returns real-time crowd occupancy data for all venue zones.
     Polled by the frontend every 30 seconds for live updates.
     """
-    return {
-        "success": True,
-        "zones": serialize_zones(),
-        "timestamp": datetime.now().isoformat(),
-        "event": EVENT_CONFIG["name"],
-    }
+    try:
+        zones = serialize_zones()
+        logger.debug("Crowd status API served | zones=%d", len(zones))
+        return {
+            "success": True,
+            "zones": zones,
+            "timestamp": datetime.now().isoformat(),
+            "event": EVENT_CONFIG["name"],
+        }
+    except Exception as exc:
+        logger.error("Failed to serve crowd status: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not retrieve crowd data.")
 
 
 @app.get("/api/announcements", summary="Get event announcements")
 @limiter.limit("30/minute")
 async def get_announcements(request: Request):
-    """Returns the 10 most recent event announcements, newest first."""
-    return {
-        "success": True,
-        "announcements": sorted(announcements, key=lambda x: x["id"], reverse=True)[:10],
-    }
+    """Returns the most recent event announcements from Firestore or in-memory, newest first."""
+    try:
+        if db is not None:
+            docs = (
+                db.collection("announcements")
+                .order_by("id", direction=firestore.Query.DESCENDING)
+                .limit(MAX_ANNOUNCEMENTS)
+                .stream()
+            )
+            result = [doc.to_dict() for doc in docs]
+            logger.debug("Announcements fetched from Firestore | count=%d", len(result))
+        else:
+            result = sorted(announcements, key=lambda x: x["id"], reverse=True)[:MAX_ANNOUNCEMENTS]
+        return {"success": True, "announcements": result}
+    except Exception as exc:
+        logger.error("Failed to fetch announcements: %s", exc, exc_info=True)
+        # Graceful fallback to in-memory on any Firestore error
+        result = sorted(announcements, key=lambda x: x["id"], reverse=True)[:MAX_ANNOUNCEMENTS]
+        return {"success": True, "announcements": result}
 
 
 @app.post("/api/announce", status_code=201, summary="Post a new announcement (Organizer)")
@@ -366,16 +476,30 @@ async def get_announcements(request: Request):
 async def post_announcement(request: Request, body: AnnouncementRequest):
     """
     Organizer action: broadcast a new announcement to all attendees.
+    Persisted to Firestore when available; falls back to in-memory list.
     Rate limited to 10 per hour per IP.
     """
-    new_item = {
-        "id": len(announcements) + 1,
-        "text": body.text,
-        "timestamp": datetime.now().strftime("%H:%M"),
-        "type": body.type,
-    }
-    announcements.append(new_item)
-    return {"success": True, "announcement": new_item}
+    try:
+        new_item = {
+            "id": len(announcements) + 1,
+            "text": body.text,
+            "timestamp": datetime.now().strftime("%H:%M"),
+            "type": body.type,
+        }
+        announcements.append(new_item)  # always keep in-memory copy
+
+        if db is not None:
+            try:
+                db.collection("announcements").document(str(new_item["id"])).set(new_item)
+                logger.info("Announcement persisted to Firestore | id=%s", new_item['id'])
+            except Exception as fs_exc:
+                logger.warning("Firestore write failed, in-memory only: %s", fs_exc)
+
+        logger.info("Announcement posted | type=%s | text_len=%d", body.type, len(body.text))
+        return {"success": True, "announcement": new_item}
+    except Exception as exc:
+        logger.error("Failed to post announcement: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not post announcement.")
 
 
 @app.post("/api/update-crowd", summary="Manually update zone crowd count (Organizer)")
@@ -385,13 +509,22 @@ async def update_crowd(request: Request, body: CrowdUpdateRequest):
     Organizer action: manually correct the crowd count for a specific zone.
     Count is clamped to [0, zone capacity].
     """
-    cap = crowd_state[body.zone_id]["capacity"]
-    crowd_state[body.zone_id]["current"] = max(0, min(cap, body.count))
-    return {
-        "success": True,
-        "zone_id": body.zone_id,
-        "new_count": crowd_state[body.zone_id]["current"],
-    }
+    try:
+        cap = crowd_state[body.zone_id]["capacity"]
+        new_count = max(0, min(cap, body.count))
+        crowd_state[body.zone_id]["current"] = new_count
+        logger.info("Crowd updated manually | zone=%s | count=%d", body.zone_id, new_count)
+        return {
+            "success": True,
+            "zone_id": body.zone_id,
+            "new_count": new_count,
+        }
+    except KeyError as exc:
+        logger.warning("update_crowd: zone not found: %s", exc)
+        raise HTTPException(status_code=404, detail=f"Zone not found: {body.zone_id}")
+    except Exception as exc:
+        logger.error("Failed to update crowd count: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Could not update crowd count.")
 
 
 # ─────────────────────────────────────────────────────────
@@ -460,8 +593,8 @@ RULES:
             },
         }
 
-    except Exception as e:
-        logger.error(f"Gemini chat error: {e}")
+    except Exception as exc:
+        logger.error("Gemini chat error: %s", exc, exc_info=True)
         raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
 
 
@@ -521,20 +654,43 @@ Prioritize: safety first, then crowd flow, then attendee experience."""
         ai_alerts_cache.clear()
         ai_alerts_cache.extend(validated)
 
+        # Persist to Firestore when available
+        if db is not None:
+            try:
+                doc_ref = db.collection("ai_alerts").document("latest")
+                doc_ref.set({
+                    "alerts": validated,
+                    "generated_at": datetime.now().isoformat(),
+                })
+                logger.info("AI alerts persisted to Firestore | count=%d", len(validated))
+            except Exception as fs_exc:
+                logger.warning("Firestore write failed for AI alerts: %s", fs_exc)
+
+        logger.info("AI crowd analysis complete | alerts=%d", len(validated))
         return {"success": True, "alerts": validated}
 
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON parse error from Gemini: {e}")
+    except json.JSONDecodeError as exc:
+        logger.error("JSON parse error from Gemini response: %s", exc)
         raise HTTPException(status_code=500, detail="AI response format error. Please try again.")
-    except Exception as e:
-        logger.error(f"Crowd analysis error: {e}")
+    except Exception as exc:
+        logger.error("Crowd analysis error: %s", exc, exc_info=True)
         raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
 
 
 @app.get("/api/ai-alerts", summary="Get cached AI alerts")
-async def get_ai_alerts():
-    """Returns the most recently generated AI alerts for the organizer dashboard."""
-    return {"success": True, "alerts": ai_alerts_cache}
+@limiter.limit("60/minute")
+async def get_ai_alerts(request: Request):
+    """Returns the most recently generated AI alerts from Firestore or in-memory cache."""
+    try:
+        if db is not None:
+            doc = db.collection("ai_alerts").document("latest").get()
+            if doc.exists:
+                data = doc.to_dict()
+                return {"success": True, "alerts": data.get("alerts", [])}
+        return {"success": True, "alerts": ai_alerts_cache}
+    except Exception as exc:
+        logger.warning("Failed to fetch AI alerts from Firestore, using cache: %s", exc)
+        return {"success": True, "alerts": ai_alerts_cache}
 
 
 # ─────────────────────────────────────────────────────────
@@ -551,7 +707,9 @@ async def health():
         "status": "healthy",
         "service": "venueiq",
         "version": "1.0.0",
-        "ai_configured": bool(GEMINI_API_KEY),
-        "maps_configured": bool(MAPS_API_KEY),
-        "timestamp": datetime.now().isoformat(),
+        "ai_configured":        bool(GEMINI_API_KEY),
+        "maps_configured":      bool(MAPS_API_KEY),
+        "firestore_configured": db is not None,
+        "cloud_logging":        True,
+        "timestamp":            datetime.now().isoformat(),
     }

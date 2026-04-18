@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}VenueIQ | Organizer Login{% endblock %}
+
+{% block content %}
+<main class="login-layout">
+  <div class="login-card">
+    <div class="login-header">
+      <span class="material-symbols-rounded" style="font-size:3rem;color:var(--primary);">admin_panel_settings</span>
+      <h2>Organizer Login</h2>
+      <p class="subtitle">Enter your credentials to access the dashboard.</p>
+    </div>
+    
+    <form id="login-form" class="login-form">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required>
+      </div>
+      <p id="error-msg" class="error-text" style="display:none;color:var(--danger);font-size:0.85rem;"></p>
+      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+        <span class="material-symbols-rounded">login</span>
+        Login
+      </button>
+    </form>
+    
+    <div style="margin-top:2rem;text-align:center;">
+      <a href="/" style="color:var(--muted);text-decoration:none;font-size:0.9rem;">&larr; Back to Role Selection</a>
+    </div>
+  </div>
+</main>
+
+<style>
+  .login-layout {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--spacing-md);
+  }
+  .login-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2.5rem;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+  }
+  .login-header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  .login-header h2 {
+    margin: 0.5rem 0 0.25rem 0;
+  }
+  .login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .form-group label {
+    font-size: 0.9rem;
+    font-weight: 500;
+  }
+  .form-group input {
+    padding: 0.75rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--background);
+    color: var(--text);
+  }
+  .form-group input:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+</style>
+
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const errorMsg = document.getElementById('error-msg');
+  errorMsg.style.display = 'none';
+
+  try {
+    const res = await fetch('/login', {
+      method: 'POST',
+      body: formData
+    });
+    if (res.ok) {
+      window.location.href = '/organizer';
+    } else {
+      errorMsg.textContent = 'Invalid username or password.';
+      errorMsg.style.display = 'block';
+    }
+  } catch (err) {
+    errorMsg.textContent = 'An error occurred. Please try again.';
+    errorMsg.style.display = 'block';
+  }
+});
+</script>
+{% endblock %}

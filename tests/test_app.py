@@ -119,7 +119,7 @@ async def test_get_announcements_with_mock_db(transport):
     mock_db = MagicMock()
     mock_query = MagicMock()
     mock_doc = MagicMock()
-    mock_doc.to_dict.return_value = {"id": 99, "text": "Mock DB announcement"}
+    mock_doc.to_dict.return_value = {"id": 99, "text": "Mock DB announcement", "timestamp": "12:00", "type": "info"}
     mock_query.stream.return_value = [mock_doc]
     mock_db.collection().order_by().limit.return_value = mock_query
 
@@ -205,7 +205,7 @@ async def test_analyze_crowd_with_mock_gemini(transport, auth_cookies):
     async def mock_to_thread(func, *args, **kwargs):
         return mock_response
         
-    with patch("routes.gemini_model", mock_model):
+    with patch("services.ai_service.gemini_model", mock_model):
         with patch("asyncio.to_thread", mock_to_thread):
             async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies) as client:
                 resp = await client.post("/api/analyze-crowd")
@@ -213,3 +213,22 @@ async def test_analyze_crowd_with_mock_gemini(transport, auth_cookies):
     assert resp.status_code == 200
     body = resp.json()
     assert body["alerts"][0]["zone"] == "Main Hall"
+
+@pytest.mark.asyncio
+async def test_post_announcement_translation(transport, auth_cookies):
+    """Test that posting an announcement triggers translation and saves it."""
+    payload = {"text": "Test translation", "type": "info"}
+    
+    async def mock_translate(*args, **kwargs):
+        return {"text_hi": "परीक्षण", "text_es": "Prueba"}
+        
+    with patch("services.ai_service.translate_announcement", side_effect=mock_translate):
+        async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies) as client:
+            resp = await client.post("/api/announce", json=payload)
+            
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["announcement"]["text"] == "Test translation"
+    assert body["announcement"]["text_hi"] == "परीक्षण"
+    assert body["announcement"]["text_es"] == "Prueba"
+

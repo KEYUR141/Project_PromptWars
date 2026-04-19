@@ -7,11 +7,16 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from google.cloud import firestore
 
-from config import db, gemini_model, MAPS_API_KEY, MAX_ANNOUNCEMENTS, logger
+from config import db, MAPS_API_KEY, MAX_ANNOUNCEMENTS, logger
 from state import EVENT_CONFIG, crowd_state, announcements, ai_alerts_cache
-from schemas import ChatRequest, AnnouncementRequest, CrowdUpdateRequest
-from utils import serialize_zones, build_crowd_context
+from schemas import (
+    ChatRequest, AnnouncementRequest, CrowdUpdateRequest,
+    CrowdStatusResponse, AnnouncementsResponse, PostAnnouncementResponse,
+    UpdateCrowdResponse, ChatResponseModel, AIAlertsResponse
+)
+from utils import serialize_zones
 from security import limiter, get_current_user, create_access_token
+from services import ai_service
 
 # ─────────────────────────────────────────────────────────
 # PAGE ROUTER
@@ -99,7 +104,7 @@ async def attendee_view(request: Request):
 # ─────────────────────────────────────────────────────────
 api_router = APIRouter(prefix="/api")
 
-@api_router.get("/crowd-status", summary="Get live crowd status for all zones")
+@api_router.get("/crowd-status", summary="Get live crowd status for all zones", response_model=CrowdStatusResponse)
 @limiter.limit("60/minute")
 async def get_crowd_status(request: Request):
     """Returns real-time crowd occupancy data for all venue zones."""
@@ -116,7 +121,7 @@ async def get_crowd_status(request: Request):
         logger.error("Failed to serve crowd status: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Could not retrieve crowd data.")
 
-@api_router.get("/announcements", summary="Get event announcements")
+@api_router.get("/announcements", summary="Get event announcements", response_model=AnnouncementsResponse)
 @limiter.limit("30/minute")
 async def get_announcements(request: Request):
     """Returns recent announcements from Firestore or memory."""
@@ -138,16 +143,21 @@ async def get_announcements(request: Request):
         result = sorted(announcements, key=lambda x: x["id"], reverse=True)[:MAX_ANNOUNCEMENTS]
         return {"success": True, "announcements": result}
 
-@api_router.post("/announce", status_code=201, summary="Post a new announcement (Organizer)", dependencies=[Depends(get_current_user)])
+@api_router.post("/announce", status_code=201, summary="Post a new announcement (Organizer)", dependencies=[Depends(get_current_user)], response_model=PostAnnouncementResponse)
 @limiter.limit("10/hour")
 async def post_announcement(request: Request, body: AnnouncementRequest):
     """Broadcast a new announcement to all attendees. Protected by JWT."""
     try:
+        # Generate Translations
+        translations = await ai_service.translate_announcement(body.text)
+        
         new_item = {
             "id": len(announcements) + 1,
             "text": body.text,
             "timestamp": datetime.now().strftime("%H:%M"),
             "type": body.type,
+            "text_hi": translations.get("text_hi"),
+            "text_es": translations.get("text_es"),
         }
         announcements.append(new_item)
 
@@ -164,7 +174,7 @@ async def post_announcement(request: Request, body: AnnouncementRequest):
         logger.error("Failed to post announcement: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Could not post announcement.")
 
-@api_router.post("/update-crowd", summary="Manually update zone crowd count (Organizer)", dependencies=[Depends(get_current_user)])
+@api_router.post("/update-crowd", summary="Manually update zone crowd count (Organizer)", dependencies=[Depends(get_current_user)], response_model=UpdateCrowdResponse)
 @limiter.limit("30/hour")
 async def update_crowd(request: Request, body: CrowdUpdateRequest):
     """Manually correct the crowd count. Protected by JWT."""
@@ -181,99 +191,26 @@ async def update_crowd(request: Request, body: CrowdUpdateRequest):
         logger.error("Failed to update crowd count: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Could not update crowd count.")
 
-@api_router.post("/chat", summary="Attendee AI chat powered by Gemini")
+@api_router.post("/chat", summary="Attendee AI chat powered by Gemini", response_model=ChatResponseModel)
 @limiter.limit("20/hour")
 async def chat_with_ai(request: Request, body: ChatRequest):
     """Gemini-powered chat context-aware of the crowd state."""
-    if not gemini_model:
-        raise HTTPException(status_code=503, detail="AI service not configured.")
-    
-    crowd_context = build_crowd_context()
-    sys_prompt = f"""You are the VenueIQ Smart Guide for the {EVENT_CONFIG['name']} at {EVENT_CONFIG['venue']}.
-Your goal is to help attendees navigate the venue and find sessions.
-Keep responses concise (1-3 sentences). Use emojis. Be helpful and polite.
+    reply, history, stats_snapshot = await ai_service.process_chat(body.message, body.history)
+    return {
+        "success": True,
+        "reply": reply,
+        "history": history,
+        "stats_snapshot": stats_snapshot,
+    }
 
-{crowd_context}
-
-If asked about crowdedness, guide them to quieter zones.
-"""
-    try:
-        chat = gemini_model.start_chat(history=body.history[-MAX_HISTORY_ITEMS:])
-        response = await asyncio.to_thread(chat.send_message, sys_prompt + "\n\nUser: " + body.message)
-        return {
-            "success": True,
-            "reply": bleach.clean(response.text, tags=[], strip=True),
-            "history": [
-                {"role": "user", "parts": body.message},
-                {"role": "model", "parts": response.text}
-            ],
-            "stats_snapshot": {zid: z["current"] for zid, z in crowd_state.items()},
-        }
-    except Exception as exc:
-        logger.error("Gemini chat error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=503, detail="AI service temporarily unavailable. Please try again.")
-
-@api_router.post("/analyze-crowd", summary="Generate AI crowd management alerts (Organizer)", dependencies=[Depends(get_current_user)])
+@api_router.post("/analyze-crowd", summary="Generate AI crowd management alerts (Organizer)", dependencies=[Depends(get_current_user)], response_model=AIAlertsResponse)
 @limiter.limit("10/hour")
 async def analyze_crowd(request: Request):
     """Trigger Gemini to analyze crowd state. Protected by JWT."""
-    if not gemini_model:
-        raise HTTPException(status_code=503, detail="AI service not configured.")
+    alerts = await ai_service.generate_crowd_alerts()
+    return {"success": True, "alerts": alerts}
 
-    crowd_context = build_crowd_context()
-    prompt = f"""{crowd_context}
-
-You are VenueIQ, an AI crowd management system. Analyze the data above and generate exactly 3 specific, actionable operational alerts for the event organizer.
-
-Respond with ONLY a valid JSON array (no markdown, no extra text):
-[
-  {{"level": "critical|warning|info", "zone": "Zone Name", "message": "Specific action to take now", "icon": "single emoji"}},
-  {{"level": "...", "zone": "...", "message": "...", "icon": "..."}},
-  {{"level": "...", "zone": "...", "message": "...", "icon": "..."}}
-]
-"""
-    try:
-        response = await asyncio.to_thread(gemini_model.generate_content, prompt)
-        raw = response.text.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        raw = raw.strip()
-
-        alerts = json.loads(raw)
-        validated = []
-        for alert in alerts[:3]:
-            if isinstance(alert, dict) and "message" in alert:
-                validated.append({
-                    "level": alert.get("level", "info"),
-                    "zone": bleach.clean(str(alert.get("zone", "")), tags=[], strip=True),
-                    "message": bleach.clean(str(alert.get("message", "")), tags=[], strip=True),
-                    "icon": alert.get("icon", "ℹ️"),
-                    "timestamp": datetime.now().strftime("%H:%M"),
-                })
-
-        ai_alerts_cache.clear()
-        ai_alerts_cache.extend(validated)
-
-        if db is not None:
-            try:
-                doc_ref = db.collection("ai_alerts").document("latest")
-                doc_ref.set({"alerts": validated, "generated_at": datetime.now().isoformat()})
-                logger.info("AI alerts persisted to Firestore | count=%d", len(validated))
-            except Exception as fs_exc:
-                logger.warning("Firestore write failed for AI alerts: %s", fs_exc)
-
-        logger.info("AI crowd analysis complete | alerts=%d", len(validated))
-        return {"success": True, "alerts": validated}
-    except json.JSONDecodeError as exc:
-        logger.error("JSON parse error from Gemini response: %s", exc)
-        raise HTTPException(status_code=500, detail="AI response format error.")
-    except Exception as exc:
-        logger.error("Crowd analysis error: %s", exc, exc_info=True)
-        raise HTTPException(status_code=503, detail="Analysis service temporarily unavailable.")
-
-@api_router.get("/ai-alerts", summary="Get cached AI alerts")
+@api_router.get("/ai-alerts", summary="Get cached AI alerts", response_model=AIAlertsResponse)
 @limiter.limit("60/minute")
 async def get_ai_alerts(request: Request):
     """Returns generated AI alerts from Firestore or in-memory cache."""

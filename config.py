@@ -3,6 +3,7 @@ import logging
 import google.generativeai as genai
 import google.cloud.logging as cloud_logging
 from google.cloud import firestore
+from google.cloud import translate_v2 as translate
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -61,3 +62,10 @@ try:
     logger.info("Firestore client initialised")
 except Exception as exc:
     logger.warning("Firestore unavailable (%s) — using in-memory store", exc)
+
+translate_client = None
+try:
+    translate_client = translate.Client()
+    logger.info("Cloud Translation client initialised")
+except Exception as exc:
+    logger.warning("Translation unavailable (%s)", exc)

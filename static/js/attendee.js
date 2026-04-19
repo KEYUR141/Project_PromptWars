@@ -8,13 +8,26 @@
 let tickerAnnouncements = [];
 let tickerIndex = 0;
 
+let translationIndex = 0;
+
 /** Update the announcement ticker text */
 function rotateTicker() {
   const el = document.getElementById('ticker-text');
   if (!el || !tickerAnnouncements.length) return;
   const ann = tickerAnnouncements[tickerIndex % tickerAnnouncements.length];
-  el.textContent = ann.text;
-  tickerIndex++;
+  
+  // Cycle through available translations for this announcement
+  const parts = [ann.text];
+  if (ann.text_hi) parts.push(ann.text_hi + " (Hindi)");
+  if (ann.text_es) parts.push(ann.text_es + " (Español)");
+  
+  el.textContent = parts[translationIndex % parts.length];
+  
+  translationIndex++;
+  if (translationIndex >= parts.length) {
+    translationIndex = 0;
+    tickerIndex++;
+  }
 }
 
 /** Fetch latest announcements and start ticker rotation */

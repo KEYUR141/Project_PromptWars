@@ -59,9 +59,14 @@ function showToast(message, type = 'info') {
 
 /** Generic API fetch wrapper with error handling */
 async function apiFetch(url, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (options.method && options.method.toUpperCase() === 'POST') {
+    headers['X-CSRF-Token'] = 'venueiq-csrf-token';
+  }
+  
   const resp = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ detail: 'Request failed' }));
@@ -93,6 +98,9 @@ async function pollCrowdStatus() {
 
     const updEl = document.getElementById('last-updated');
     if (updEl) updEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+    // Emit event for other scripts to update without re-fetching
+    document.dispatchEvent(new CustomEvent('crowdUpdated', { detail: data.zones }));
 
   } catch (e) {
     console.warn('Crowd status poll error:', e.message);

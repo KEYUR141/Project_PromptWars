@@ -1,7 +1,7 @@
 import bleach
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field, field_validator
-from state import ZONE_DEFINITIONS
+from core.state import ZONE_DEFINITIONS
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=500, description="User's question")

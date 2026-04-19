@@ -21,5 +21,5 @@ ENV PORT=8080
 # Expose the port
 EXPOSE 8080
 
-# Run with Gunicorn: 2 workers, 4 threads each — efficient for Cloud Run
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "2"]
+# Run with Gunicorn: 2 workers — efficient for Cloud Run
+CMD ["gunicorn", "app:app", "--workers", "2", "--worker-class", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8080"]

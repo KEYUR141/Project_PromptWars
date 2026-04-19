@@ -15,6 +15,7 @@ Architecture:
 """
 
 import asyncio
+from typing import AsyncGenerator
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -23,13 +24,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
-from config import logger, GEMINI_API_KEY, db, MAPS_API_KEY
-from security import limiter, add_security_headers
-from simulation import run_crowd_simulation
+from core.config import logger, GEMINI_API_KEY, db, MAPS_API_KEY
+from core.security import limiter, add_security_headers
+from core.simulation import run_crowd_simulation
 from routes import api_router, page_router
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> None:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage application lifespan: start background tasks on startup."""
     task = asyncio.create_task(run_crowd_simulation())
     logger.info(
@@ -62,7 +63,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Setup CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"http://localhost:\d+|https://.*\.run\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

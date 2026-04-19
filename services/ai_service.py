@@ -4,10 +4,10 @@ import asyncio
 from datetime import datetime
 from fastapi import HTTPException
 
-from config import logger, gemini_model, translate_client
-from state import EVENT_CONFIG, crowd_state, ai_alerts_cache
-from utils import build_crowd_context
-from config import db
+from core.config import logger, gemini_model, translate_client
+from core.state import EVENT_CONFIG, crowd_state, ai_alerts_cache
+from core.utils import build_crowd_context
+from core.config import db
 
 MAX_HISTORY_ITEMS = 6
 
@@ -80,8 +80,10 @@ Respond with ONLY a valid JSON array (no markdown, no extra text):
                 })
 
         # Update cache
-        ai_alerts_cache.clear()
-        ai_alerts_cache.extend(validated)
+        from core.state import ai_alerts_lock
+        with ai_alerts_lock:
+            ai_alerts_cache.clear()
+            ai_alerts_cache.extend(validated)
 
         # Update Firestore
         if db is not None:
@@ -118,6 +120,7 @@ async def translate_announcement(text: str) -> dict:
             }
         
         translations = await asyncio.to_thread(do_translation)
+        logger.info("Translation successful for announcement")
         return translations
     except Exception as exc:
         logger.error("Translation API error: %s", exc, exc_info=True)

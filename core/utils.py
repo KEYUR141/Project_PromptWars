@@ -1,5 +1,5 @@
 from datetime import datetime
-from state import crowd_state, EVENT_CONFIG
+from core.state import crowd_state, EVENT_CONFIG
 
 def capacity_percent(zone: dict) -> int:
     """Calculate occupancy as an integer percentage."""

@@ -1,6 +1,6 @@
 import random
 from datetime import datetime
-from config import INITIAL_FILL_FRACTION
+from core.config import INITIAL_FILL_FRACTION
 
 EVENT_CONFIG = {
     "name": "Hack2Skill PromptWars 2026",
@@ -79,4 +79,6 @@ announcements: list[dict] = [
     }
 ]
 
+import threading
 ai_alerts_cache: list[dict] = []
+ai_alerts_lock = threading.Lock()

@@ -4,6 +4,7 @@ import google.generativeai as genai
 import google.cloud.logging as cloud_logging
 from google.cloud import firestore
 from google.cloud import translate_v2 as translate
+from google.cloud import bigquery
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,8 +32,12 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 MAPS_API_KEY   = os.getenv("GOOGLE_MAPS_API_KEY", "")
 SECRET_KEY     = os.getenv("SECRET_KEY", "")
 if not SECRET_KEY:
-    SECRET_KEY = os.urandom(24).hex()
-    logger.warning("SECRET_KEY not set — generated an ephemeral key. Set SECRET_KEY in production.")
+    import sys
+    logger.critical("SECRET_KEY is required but not set. Exiting.")
+    sys.exit(1)
+
+ORGANIZER_USERNAME = os.getenv("ORGANIZER_USERNAME", "admin")
+ORGANIZER_PASSWORD = os.getenv("ORGANIZER_PASSWORD", "venueiq2026")
 
 SIMULATION_INTERVAL_SECS: int   = 30
 CROWD_DRIFT_FACTOR:       float = 0.15
@@ -66,6 +71,13 @@ except Exception as exc:
 translate_client = None
 try:
     translate_client = translate.Client()
-    logger.info("Cloud Translation client initialised")
+    logger.info("Cloud Translation client initialised successfully")
 except Exception as exc:
     logger.warning("Translation unavailable (%s)", exc)
+
+bq_client = None
+try:
+    bq_client = bigquery.Client()
+    logger.info("BigQuery client initialised successfully")
+except Exception as exc:
+    logger.warning("BigQuery unavailable (%s) — analytics streaming disabled", exc)

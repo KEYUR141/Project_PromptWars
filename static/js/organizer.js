@@ -132,13 +132,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Initial stats render from server-side data
   if (window.ZONES_DATA) renderStats(window.ZONES_DATA);
 
-  // Re-render stats on each crowd poll
-  const origPoll = pollCrowdStatus;
-  window.pollCrowdStatus = async function () {
-    await origPoll();
-    try {
-      const data = await apiFetch('/api/crowd-status');
-      if (data.success) renderStats(data.zones);
-    } catch (_) {}
-  };
+  // Re-render stats when crowd is updated globally
+  document.addEventListener('crowdUpdated', (e) => {
+    renderStats(e.detail);
+  });
 });

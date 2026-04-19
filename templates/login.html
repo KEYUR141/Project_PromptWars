@@ -11,21 +11,21 @@
       <p class="subtitle">Enter your credentials to access the dashboard.</p>
     </div>
     
-    <form id="login-form" class="login-form">
+    <div id="login-form" class="login-form">
       <div class="form-group">
         <label for="username">Username</label>
         <input type="text" id="username" name="username" required>
       </div>
       <div class="form-group">
         <label for="password">Password</label>
-        <input type="password" id="password" name="password" required>
+        <input type="password" id="password" name="password" required onkeypress="if(event.key === 'Enter') login()">
       </div>
       <p id="error-msg" class="error-text" style="display:none;color:var(--danger);font-size:0.85rem;"></p>
-      <button type="submit" class="btn btn-primary" style="width:100%;justify-content:center;">
+      <button type="button" class="btn btn-primary" style="width:100%;justify-content:center;" onclick="login()">
         <span class="material-symbols-rounded">login</span>
         Login
       </button>
-    </form>
+    </div>
     
     <div style="margin-top:2rem;text-align:center;">
       <a href="/" style="color:var(--muted);text-decoration:none;font-size:0.9rem;">&larr; Back to Role Selection</a>
@@ -39,12 +39,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--spacing-md);
+    padding: 2rem;
   }
   .login-card {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius);
     padding: 2.5rem;
     width: 100%;
     max-width: 400px;
@@ -73,9 +73,9 @@
   }
   .form-group input {
     padding: 0.75rem;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border);
-    background: var(--background);
+    background: var(--surface);
     color: var(--text);
   }
   .form-group input:focus {
@@ -85,11 +85,21 @@
 </style>
 
 <script>
-document.getElementById('login-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const formData = new FormData(e.target);
+async function login() {
+  const userEl = document.getElementById('username');
+  const passEl = document.getElementById('password');
   const errorMsg = document.getElementById('error-msg');
   errorMsg.style.display = 'none';
+
+  if (!userEl.value || !passEl.value) {
+    errorMsg.textContent = 'Please fill out both fields.';
+    errorMsg.style.display = 'block';
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('username', userEl.value);
+  formData.append('password', passEl.value);
 
   try {
     const res = await fetch('/login', {
@@ -106,6 +116,6 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     errorMsg.textContent = 'An error occurred. Please try again.';
     errorMsg.style.display = 'block';
   }
-});
+}
 </script>
 {% endblock %}

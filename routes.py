@@ -2,20 +2,20 @@ import json
 import bleach
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, Request, HTTPException, Depends, Form, Response
+from fastapi import APIRouter, Request, HTTPException, Depends, Form, Response, Header
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import OAuth2PasswordRequestForm
+import secrets
 from google.cloud import firestore
 
-from config import db, MAPS_API_KEY, MAX_ANNOUNCEMENTS, logger
-from state import EVENT_CONFIG, crowd_state, announcements, ai_alerts_cache
-from schemas import (
+from core.config import db, MAPS_API_KEY, MAX_ANNOUNCEMENTS, logger
+from core.state import EVENT_CONFIG, crowd_state, announcements, ai_alerts_cache, ai_alerts_lock
+from core.schemas import (
     ChatRequest, AnnouncementRequest, CrowdUpdateRequest,
     CrowdStatusResponse, AnnouncementsResponse, PostAnnouncementResponse,
     UpdateCrowdResponse, ChatResponseModel, AIAlertsResponse
 )
-from utils import serialize_zones
-from security import limiter, get_current_user, create_access_token
+from core.utils import serialize_zones
+from core.security import limiter, get_current_user, create_access_token
 from services import ai_service
 
 # ─────────────────────────────────────────────────────────
@@ -43,7 +43,8 @@ async def login_page(request: Request):
 @page_router.post("/login", include_in_schema=False)
 async def login(response: Response, username: str = Form(...), password: str = Form(...)):
     """Authenticate and set JWT cookie."""
-    if username == "admin" and password == "venueiq2026":
+    from core.config import ORGANIZER_USERNAME, ORGANIZER_PASSWORD
+    if secrets.compare_digest(username, ORGANIZER_USERNAME) and secrets.compare_digest(password, ORGANIZER_PASSWORD):
         access_token = create_access_token(data={"sub": username})
         response.set_cookie(
             key="access_token",
@@ -143,7 +144,13 @@ async def get_announcements(request: Request):
         result = sorted(announcements, key=lambda x: x["id"], reverse=True)[:MAX_ANNOUNCEMENTS]
         return {"success": True, "announcements": result}
 
-@api_router.post("/announce", status_code=201, summary="Post a new announcement (Organizer)", dependencies=[Depends(get_current_user)], response_model=PostAnnouncementResponse)
+async def verify_csrf_token(x_csrf_token: str = Header(None)):
+    """Simple CSRF protection for API routes."""
+    if not x_csrf_token or x_csrf_token != "venueiq-csrf-token":
+        raise HTTPException(status_code=403, detail="CSRF validation failed")
+    return True
+
+@api_router.post("/announce", status_code=201, summary="Post a new announcement (Organizer)", dependencies=[Depends(get_current_user), Depends(verify_csrf_token)], response_model=PostAnnouncementResponse)
 @limiter.limit("10/hour")
 async def post_announcement(request: Request, body: AnnouncementRequest):
     """Broadcast a new announcement to all attendees. Protected by JWT."""
@@ -174,7 +181,7 @@ async def post_announcement(request: Request, body: AnnouncementRequest):
         logger.error("Failed to post announcement: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Could not post announcement.")
 
-@api_router.post("/update-crowd", summary="Manually update zone crowd count (Organizer)", dependencies=[Depends(get_current_user)], response_model=UpdateCrowdResponse)
+@api_router.post("/update-crowd", summary="Manually update zone crowd count (Organizer)", dependencies=[Depends(get_current_user), Depends(verify_csrf_token)], response_model=UpdateCrowdResponse)
 @limiter.limit("30/hour")
 async def update_crowd(request: Request, body: CrowdUpdateRequest):
     """Manually correct the crowd count. Protected by JWT."""
@@ -220,7 +227,9 @@ async def get_ai_alerts(request: Request):
             if doc.exists:
                 data = doc.to_dict()
                 return {"success": True, "alerts": data.get("alerts", [])}
-        return {"success": True, "alerts": ai_alerts_cache}
+        with ai_alerts_lock:
+            return {"success": True, "alerts": list(ai_alerts_cache)}
     except Exception as exc:
         logger.warning("Failed to fetch AI alerts from Firestore, using cache: %s", exc)
-        return {"success": True, "alerts": ai_alerts_cache}
+        with ai_alerts_lock:
+            return {"success": True, "alerts": list(ai_alerts_cache)}

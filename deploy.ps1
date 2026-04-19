@@ -2,7 +2,7 @@
 # VenueIQ — Google Cloud Run Deployment Command
 # ═══════════════════════════════════════════════════════════
 # Run this from the Project_PromptWars directory after 
-# replacing YOUR_GEMINI_KEY and YOUR_MAPS_KEY with real values.
+# sourcing your variables securely (e.g. from your .env file).
 # ═══════════════════════════════════════════════════════════
 
 gcloud run deploy venueiq `
@@ -10,7 +10,7 @@ gcloud run deploy venueiq `
   --region us-central1 `
   --allow-unauthenticated `
   --project project-zoo-agent-489715 `
-  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_MAPS_API_KEY=YOUR_MAPS_KEY,SECRET_KEY=venueiq-hackskill-2026-secret" `
+  --set-env-vars "GEMINI_API_KEY=YOUR_GEMINI_KEY,GOOGLE_MAPS_API_KEY=YOUR_MAPS_KEY,SECRET_KEY=venueiq-hackskill-2026-secret,ORGANIZER_USERNAME=admin,ORGANIZER_PASSWORD=venueiq2026" `
   --memory 512Mi `
   --cpu 1 `
   --min-instances 0 `

@@ -5,7 +5,7 @@ from fastapi import Request, HTTPException, Security
 from fastapi.security import APIKeyCookie
 from slowapi import Limiter
 from slowapi.util import get_remote_address
-from config import SECRET_KEY
+from core.config import SECRET_KEY
 
 logger = logging.getLogger("venueiq")
 

@@ -2,8 +2,8 @@ import asyncio
 import random
 import logging
 from datetime import datetime
-from state import crowd_state
-from config import SIMULATION_INTERVAL_SECS, CROWD_DELTA_RANGE, CROWD_DRIFT_FACTOR
+from core.state import crowd_state, EVENT_CONFIG
+from core.config import SIMULATION_INTERVAL_SECS, CROWD_DELTA_RANGE, CROWD_DRIFT_FACTOR, bq_client
 
 logger = logging.getLogger("venueiq")
 
@@ -34,7 +34,27 @@ async def run_crowd_simulation() -> None:
                 crowd_state[zone_id]["current"] = max(0, min(zone["capacity"], new_val))
 
             snapshot = {zid: z["current"] for zid, z in crowd_state.items()}
-            logger.info("Crowd simulation updated | totals=%s", snapshot)
+            
+            # BigQuery Streaming
+            if bq_client:
+                try:
+                    table_id = "venueiq.analytics.crowd_history"
+                    rows_to_insert = [
+                        {"zone_id": zid, "current": z["current"], "capacity": z["capacity"], "timestamp": datetime.utcnow().isoformat()}
+                        for zid, z in crowd_state.items()
+                    ]
+                    try:
+                        bq_client.insert_rows_json(table_id, rows_to_insert)
+                    except Exception as bq_err:
+                        logger.debug("BigQuery insert skipped (mocked for local dev): %s", bq_err)
+                except Exception as e:
+                    logger.warning("BigQuery streaming failed: %s", e)
+
+            logger.info(
+                "Crowd simulation updated | totals=%s", 
+                snapshot, 
+                extra={"json_fields": {"simulation_totals": snapshot, "event": EVENT_CONFIG["name"]}}
+            )
 
         except asyncio.CancelledError:
             logger.info("Crowd simulation task cancelled — shutting down gracefully")

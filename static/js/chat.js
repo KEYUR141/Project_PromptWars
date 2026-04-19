@@ -66,10 +66,10 @@ async function sendChat() {
     hideTyping();
 
     if (data.success) {
-      appendMessage(data.response, 'ai');
+      appendMessage(data.reply, 'ai');
       // Maintain rolling history for context
-      chatHistory.push({ role: 'user', content: message });
-      chatHistory.push({ role: 'model', content: data.response });
+      chatHistory.push({ role: 'user', parts: message });
+      chatHistory.push({ role: 'model', parts: data.reply });
       if (chatHistory.length > 12) chatHistory = chatHistory.slice(-12);
     } else {
       appendMessage('⚠️ Sorry, I couldn\'t process that. Please try again.', 'ai');

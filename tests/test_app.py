@@ -17,10 +17,10 @@ os.environ.setdefault("GOOGLE_MAPS_API_KEY", "test-maps-key")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from app import app
-from state import crowd_state, announcements, ZONE_DEFINITIONS, EVENT_CONFIG
-import config
-from utils import status_label, build_crowd_context
-from security import create_access_token
+from core.state import crowd_state, announcements, ZONE_DEFINITIONS, EVENT_CONFIG
+import core.config as config
+from core.utils import status_label, build_crowd_context
+from core.security import create_access_token
 
 
 # ─────────────────────────────────────────────────────────
@@ -95,6 +95,14 @@ async def test_attendee_page(transport):
         resp = await client.get("/attendee")
     assert resp.status_code == 200
 
+@pytest.mark.asyncio
+async def test_attendee_zone_rendering(transport):
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/attendee")
+    assert resp.status_code == 200
+    # Assert zone data is present in HTML (e.g. food_court should be rendered)
+    assert b"id=\"zone-food_court\"" in resp.content or b"food_court" in resp.content
+
 
 # ─────────────────────────────────────────────────────────
 # Crowd Status API
@@ -141,7 +149,7 @@ async def test_post_announcement_unauthorized(transport):
 @pytest.mark.asyncio
 async def test_post_announcement_authorized(transport, auth_cookies):
     payload = {"text": "Workshop B session starting now!", "type": "info"}
-    async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies) as client:
+    async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies, headers={"x-csrf-token": "venueiq-csrf-token"}) as client:
         resp = await client.post("/api/announce", json=payload)
     assert resp.status_code == 201
 
@@ -160,9 +168,17 @@ async def test_update_crowd_unauthorized(transport):
 @pytest.mark.asyncio
 async def test_update_crowd_authorized(transport, auth_cookies):
     payload = {"zone_id": "food_court", "count": 100}
-    async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies) as client:
+    async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies, headers={"x-csrf-token": "venueiq-csrf-token"}) as client:
         resp = await client.post("/api/update-crowd", json=payload)
     assert resp.status_code == 200
+
+@pytest.mark.asyncio
+async def test_update_crowd_invalid_zone(transport, auth_cookies):
+    payload = {"zone_id": "non_existent_zone", "count": 100}
+    async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies, headers={"x-csrf-token": "venueiq-csrf-token"}) as client:
+        resp = await client.post("/api/update-crowd", json=payload)
+    # The validation happens in Pydantic schema -> 422 Unprocessable Entity
+    assert resp.status_code == 422
 
 
 # ─────────────────────────────────────────────────────────
@@ -215,6 +231,13 @@ async def test_analyze_crowd_with_mock_gemini(transport, auth_cookies):
     assert body["alerts"][0]["zone"] == "Main Hall"
 
 @pytest.mark.asyncio
+async def test_get_ai_alerts(transport):
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/api/ai-alerts")
+    assert resp.status_code == 200
+    assert "alerts" in resp.json()
+
+@pytest.mark.asyncio
 async def test_post_announcement_translation(transport, auth_cookies):
     """Test that posting an announcement triggers translation and saves it."""
     payload = {"text": "Test translation", "type": "info"}
@@ -223,7 +246,7 @@ async def test_post_announcement_translation(transport, auth_cookies):
         return {"text_hi": "परीक्षण", "text_es": "Prueba"}
         
     with patch("services.ai_service.translate_announcement", side_effect=mock_translate):
-        async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies) as client:
+        async with AsyncClient(transport=transport, base_url="http://test", cookies=auth_cookies, headers={"x-csrf-token": "venueiq-csrf-token"}) as client:
             resp = await client.post("/api/announce", json=payload)
             
     assert resp.status_code == 201

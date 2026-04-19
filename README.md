@@ -9,6 +9,10 @@
 
 ---
 
+
+
+---
+
 ## 🎯 Chosen Vertical: Physical Event Experience
 
 VenueIQ addresses the three core challenges of large-scale physical events:
@@ -118,6 +122,8 @@ uvicorn app:app --reload --port 8080
 ```bash
 pytest tests/ -v
 ```
+
+**Frontend Testing:** The frontend JavaScript layer is tested via manual QA. (Cypress/Playwright tests can be integrated here for E2E).
 
 ---
 

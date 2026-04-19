@@ -63,22 +63,14 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!window.MAPS_API_KEY) return;
   initMap();
 
-  const origPoll = window.pollCrowdStatus;
-  if (origPoll) {
-    window.pollCrowdStatus = async function () {
-      await origPoll();
-      try {
-        const data = await apiFetch('/api/crowd-status');
-        if (data.success && map) {
-          data.zones.forEach(zone => {
-            const m = markers[zone.id];
-            if (m) {
-              m.pin.background = statusColors[zone.status];
-              m.marker.title = `${zone.name} (${zone.percentage}%)`;
-            }
-          });
-        }
-      } catch (_) {}
-    };
-  }
+  document.addEventListener('crowdUpdated', (e) => {
+    if (!map) return;
+    e.detail.forEach(zone => {
+      const m = markers[zone.id];
+      if (m) {
+        m.pin.background = statusColors[zone.status];
+        m.marker.title = `${zone.name} (${zone.percentage}%)`;
+      }
+    });
+  });
 });
